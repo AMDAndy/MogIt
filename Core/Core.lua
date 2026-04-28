@@ -9,6 +9,62 @@ LibStub("Libra"):Embed(mog);
 mog.frame = MogItFrame;
 mog.list = {};
 
+--// Race/Gender Display Data (shared across Preview, GUI, Tooltip, Options)
+-- Creature display IDs for each playable race, indexed by gender (1=male, 2=female)
+mog.raceDisplayIDs = {
+	[1]  = { 49794, 49796 },   -- Human
+	[2]  = { 51894, 51895 },   -- Orc
+	[3]  = { 49798, 49800 },   -- Dwarf
+	[4]  = { 50420, 50421 },   -- Night Elf
+	[5]  = { 51873, 51874 },   -- Undead
+	[6]  = { 51872, 51871 },   -- Tauren
+	[7]  = { 49806, 49808 },   -- Gnome
+	[8]  = { 51896, 51897 },   -- Troll
+	[9]  = { 57242, 57243 },   -- Goblin
+	[10] = { 51898, 51899 },   -- Blood Elf
+	[11] = { 49810, 49812 },   -- Draenei
+	[22] = { 53764, 53765 },   -- Worgen
+	[24] = { 55264, 55270 },   -- Pandaren
+	[25] = { 55264, 55270 },   -- Pandaren (Alliance)
+	[26] = { 55264, 55270 },   -- Pandaren (Horde)
+	[27] = { 81283, 81285 },   -- Nightborne
+	[28] = { 81381, 81383 },   -- Highmountain Tauren
+	[29] = { 81677, 81678 },   -- Void Elf
+	[30] = { 81675, 81676 },   -- Lightforged Draenei
+	[31] = { 88413, 88414 },   -- Zandalari Troll
+	[32] = { 91128, 91129 },   -- Kul Tiran
+	[34] = { 88587, 88588 },   -- Dark Iron Dwarf
+	[35] = { 94620, 94621 },   -- Vulpera
+	[36] = { 88397, 88398 },   -- Mag'har Orc
+	[37] = { 94942, 94943 },   -- Mechagnome
+	[52] = { 103219, 103220 }, -- Dracthyr
+	[85] = { 117280, 117281 }, -- Earthen
+}
+
+mog.raceOrder = {
+	1, 3, 4, 7, 11, 22, 32, 34, 37, 29, 30,  -- Alliance-ish
+	2, 5, 6, 8, 9, 10, 27, 28, 31, 36, 35,    -- Horde-ish
+	24, 52, 85,                                  -- Neutral
+}
+
+mog.GENDER_MALE = 0
+mog.GENDER_FEMALE = 1
+
+function mog:GetRaceDisplayID(raceID, genderIndex)
+	local displays = self.raceDisplayIDs[raceID]
+	if not displays then return nil end
+	return displays[(genderIndex or self.GENDER_MALE) + 1]
+end
+
+function mog:SetActorRace(actor, raceID, genderIndex)
+	if not actor then return end
+	local displayID = self:GetRaceDisplayID(raceID, genderIndex)
+	if displayID then
+		actor:SetModelByCreatureDisplayID(displayID)
+	end
+end
+--//
+
 function mog:Error(msg)
 	DEFAULT_CHAT_FRAME:AddMessage("MogIt: "..msg,0.9,0.5,0.9);
 end
@@ -425,10 +481,11 @@ end
 
 function mog:AddTransmogCategoryCollection(categoryType, categoryModule)
 	local GetAppearanceSources = C_TransmogCollection.GetAppearanceSources
+	local slotID = CollectionWardrobeUtil.GetSlotFromCategoryID(categoryType)
+	local transmogLocation = slotID and TransmogUtil.GetTransmogLocation(slotID, Enum.TransmogType.Appearance, Enum.TransmogModification.Main) or nil
 
-	local transmogLocation = TransmogUtil.GetTransmogLocation(CollectionWardrobeUtil.GetSlotFromCategoryID(categoryType), Enum.TransmogType.Appearance, Enum.TransmogModification.Main)
 	for i, appearance in ipairs(C_TransmogCollection.GetCategoryAppearances(categoryType, transmogLocation)) do
-		if not appearance.isHideVisual and appearance.canDisplayOnPlayer then
+		if not appearance.isHideVisual then
 			for i, source in ipairs(GetAppearanceSources(appearance.visualID, categoryType, transmogLocation)) do
 				local id = source.sourceID or sourceID
 				tinsert(categoryModule.list, id)
@@ -438,7 +495,6 @@ function mog:AddTransmogCategoryCollection(categoryType, categoryModule)
 		end
 	end
 end
-
 
 function mog:TRANSMOG_COLLECTION_SOURCE_ADDED(sourceID)
 end
@@ -464,47 +520,76 @@ function mog:PLAYER_LOGIN()
 		mog.db.profile.gridHeight = height;
 		mog:UpdateGUI(true);
 	end)
+end
 
-	local currentClassFilter = C_TransmogCollection.GetClassFilter()
+do
+	-- Armor category IDs from CollectionWardrobeUtil.GetSlotFromCategoryID
+	-- 1=Head, 2=Shoulder, 3=Back, 4=Chest, 5=Shirt, 6=Tabard,
+	-- 7=Wrist, 8=Hands, 9=Waist, 10=Legs, 11=Feet
+	-- Labels use WoW global strings for proper localization
+	local armorSlots = {
+		{ label = INVTYPE_HEAD,     category = 1  },
+		{ label = INVTYPE_SHOULDER, category = 2  },
+		{ label = INVTYPE_CLOAK,    category = 3  },
+		{ label = INVTYPE_CHEST,    category = 4  },
+		{ label = INVTYPE_BODY,     category = 5  },
+		{ label = INVTYPE_TABARD,   category = 6  },
+		{ label = INVTYPE_WRIST,    category = 7  },
+		{ label = INVTYPE_HAND,     category = 8  },
+		{ label = INVTYPE_WAIST,    category = 9  },
+		{ label = INVTYPE_LEGS,     category = 10 },
+		{ label = INVTYPE_FEET,     category = 11 },
+	}
 
-	for k, module in pairs(self.modules) do
-		if module.base and module.classID then
-			C_TransmogCollection.SetClassFilter(module.classID)
+	local function populateModules()
+		local currentClassFilter = C_TransmogCollection.GetClassFilter()
 
-			for i, slot in ipairs(self.slots) do
-				slot = slot:upper()
-				local transmogLocation = TransmogUtil.GetTransmogLocation(slot, Enum.TransmogType.Appearance, false)
-				if not transmogLocation:IsEitherHand() then
-					local categoryType = transmogLocation:GetArmorCategoryID()
-					local name = _G[slot]
-					module.slots[categoryType] = {
-						category = categoryType,
-						label = name,
+		for k, module in pairs(mog.modules) do
+			if module.base and module.classID then
+				wipe(module.slots)
+				wipe(module.slotList)
+
+				-- hardcoded armor slots (removed from GetCategoryInfo in 12.0.5)
+				for i, armor in ipairs(armorSlots) do
+					local entry = {
+						category = armor.category,
+						label = armor.label,
 						isWeapon = false,
 						parentModule = module,
 						list = { },
 					}
-					tinsert(module.slotList, module.slots[categoryType])
+					module.slots[armor.category] = entry
+					tinsert(module.slotList, entry)
 				end
-			end
 
-			for categoryType = Enum.TransmogCollectionTypeMeta.MinValue, Enum.TransmogCollectionTypeMeta.MaxValue do
-				local name, isWeapon = C_TransmogCollection.GetCategoryInfo(categoryType)
-				if name and isWeapon then
-					module.slots[categoryType] = {
-						category = categoryType,
-						label = name,
-						isWeapon = isWeapon,
-						parentModule = module,
-						list = { },
-					}
-					tinsert(module.slotList, module.slots[categoryType])
+				-- weapon categories from API (still works)
+				C_TransmogCollection.SetClassFilter(module.classID)
+				for categoryType = Enum.TransmogCollectionTypeMeta.MinValue, Enum.TransmogCollectionTypeMeta.MaxValue do
+					local name, isWeapon = C_TransmogCollection.GetCategoryInfo(categoryType)
+					if name and isWeapon then
+						module.slots[categoryType] = {
+							category = categoryType,
+							label = name,
+							isWeapon = true,
+							parentModule = module,
+							list = { },
+						}
+						tinsert(module.slotList, module.slots[categoryType])
+					end
 				end
+
+				-- restore class filter after each module so it never gets stuck
+				C_TransmogCollection.SetClassFilter(currentClassFilter)
 			end
 		end
 	end
 
-	C_TransmogCollection.SetClassFilter(currentClassFilter)
+	local f = CreateFrame("Frame")
+	f:RegisterEvent("PLAYER_LOGIN")
+	f:SetScript("OnEvent", function(self)
+		self:UnregisterEvent("PLAYER_LOGIN")
+		populateModules()
+	end)
 end
 
 local function dressModels()

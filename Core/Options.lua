@@ -307,6 +307,45 @@ function mog.createOptions()
 				end,
 				arg = "tooltipMod",
 			},
+			customModel = {
+				type = "toggle",
+				order = 9,
+				name = L["Use custom model"],
+				width = "full",
+				arg = "tooltipCustomModel",
+			},
+			race = {
+				type = "select",
+				order = 10,
+				name = L["Model race"],
+				values = function()
+					local tbl = {}
+					for i, rID in ipairs(mog.raceOrder) do
+						local raceInfo = C_CreatureInfo.GetRaceInfo(rID)
+						if raceInfo then
+							tbl[rID] = raceInfo.raceName
+						end
+					end
+					return tbl
+				end,
+				arg = "tooltipRace",
+				disabled = function()
+					return not mog.db.profile.tooltipCustomModel;
+				end,
+			},
+			gender = {
+				type = "select",
+				order = 11,
+				name = L["Model gender"],
+				values = {
+					[0] = MALE,
+					[1] = FEMALE,
+				},
+				arg = "tooltipGender",
+				disabled = function()
+					return not mog.db.profile.tooltipCustomModel;
+				end,
+			},
 			anchor = {
 				type = "select",
 				order = 12,

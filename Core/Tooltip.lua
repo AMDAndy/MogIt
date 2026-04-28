@@ -57,21 +57,64 @@ mog.tooltip:RegisterEvent("DISPLAY_SIZE_CHANGED");
 mog.tooltip.model:SetAnimation(0, 0);
 local lightValues = { omnidirectional = false, point = CreateVector3D(0, 0.8, -1), ambientIntensity = 1, ambientColor = CreateColor(1, 1, 1), diffuseIntensity = 0.3, diffuseColor = CreateColor(1, 1, 1) };
 mog.tooltip.model:SetLight(true, lightValues);
+
+-- ModelScene overlay for custom race tooltip display
+mog.tooltip.scene = CreateFrame("ModelScene", nil, mog.tooltip, "ModelSceneMixinTemplate")
+mog.tooltip.scene:SetPoint("TOPLEFT", 5, -5)
+mog.tooltip.scene:SetPoint("BOTTOMRIGHT", -5, 5)
+mog.tooltip.scene:EnableMouse(false)
+mog.tooltip.scene:SetFromModelSceneID(290)
+mog.tooltip.scene:Hide()
+
+mog.tooltip.actor = mog.tooltip.scene:CreateActor()
+mog.tooltip.actor:SetPosition(0, 0, 0)
+mog.tooltip.actor:ClearModel()
+
+local function tooltipIsCustomRace()
+	local db = mog.db.profile
+	return db.tooltipCustomModel and db.tooltipRace
+end
+
+local function tooltipSetupModel()
+	if tooltipIsCustomRace() then
+		local db = mog.db.profile
+		mog.tooltip.scene:Show()
+		mog.tooltip.model:SetAlpha(0)
+		mog:SetActorRace(mog.tooltip.actor, db.tooltipRace, db.tooltipGender or mog.GENDER_MALE)
+	else
+		mog.tooltip.scene:Hide()
+		mog.tooltip.model:SetAlpha(1)
+	end
+end
+
+local function tooltipTryOn(item)
+	if tooltipIsCustomRace() and mog.tooltip.actor then
+		mog.tooltip.actor:TryOn(item)
+	else
+		mog.tooltip.model:TryOn(item)
+	end
+end
+
 mog.tooltip.model.ResetModel = function(self)
 	local db = mog.db.profile
-	self:Dress();
-	if not (db.tooltipDress and isModifierKeyDown(db.tooltipDressMod)) then
-		-- the worst of hacks to prevent certain armor model pieces from getting stuck on the character
-		for i, slotName in ipairs(mog.slots) do
-			local slot = GetInventorySlotInfo(slotName);
-			local item = GetInventoryItemLink("player", slot);
-			if item then
-				self:TryOn(item);
-				self:UndressSlot(slot);
+	tooltipSetupModel()
+	if tooltipIsCustomRace() then
+		mog.tooltip.actor:Undress()
+	else
+		self:Dress();
+		if not (db.tooltipDress and isModifierKeyDown(db.tooltipDressMod)) then
+			-- the worst of hacks to prevent certain armor model pieces from getting stuck on the character
+			for i, slotName in ipairs(mog.slots) do
+				local slot = GetInventorySlotInfo(slotName);
+				local item = GetInventoryItemLink("player", slot);
+				if item then
+					self:TryOn(item);
+					self:UndressSlot(slot);
+				end
 			end
+			self:UndressSlot(GetInventorySlotInfo("MainHandSlot"));
+			self:UndressSlot(GetInventorySlotInfo("SecondaryHandSlot"));
 		end
-		self:UndressSlot(GetInventorySlotInfo("MainHandSlot"));
-		self:UndressSlot(GetInventorySlotInfo("SecondaryHandSlot"));
 	end
 end
 mog.tooltip.model:SetScript("OnShow", mog.tooltip.model.ResetModel);
@@ -113,7 +156,7 @@ function mog.tooltip:ShowItem(itemLink)
 					--end
 					-- this seems to be needed for when moving from one item to another without the tooltip hiding in between
 					tooltip.model:ResetModel();
-					tooltip.model:TryOn(itemLink);
+					tooltipTryOn(itemLink);
 				else
 					tooltip:Hide();
 				end

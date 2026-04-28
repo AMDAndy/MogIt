@@ -3,6 +3,10 @@ local L = mog.L;
 
 mog.sheathe = false
 
+-- Catalogue-wide display race/gender (nil = player's own)
+mog.displayRace = nil
+mog.displayGender = nil
+
 local ModelFramePrototype = CreateFrame("Button")
 local ModelFrame_MT = {__index = ModelFramePrototype}
 
@@ -46,7 +50,6 @@ function mog:CreateModelFrame(parent)
 		local f = mog.modelBin[1];
 		f.parent = parent;
 		f:SetParent(parent);
-		--f:Show();
 		tremove(mog.modelBin,1);
 		return f;
 	end
@@ -62,6 +65,17 @@ function mog:CreateModelFrame(parent)
 
 	local lightValues = { omnidirectional = false, point = CreateVector3D(0, 0.8, -1), ambientIntensity = 1, ambientColor = CreateColor(1, 1, 1), diffuseIntensity = 0.3, diffuseColor = CreateColor(1, 1, 1) };
 	f.model:SetLight(true, lightValues);
+
+	-- ModelScene + actor overlay for race/gender switching
+	f.scene = CreateFrame("ModelScene", nil, f, "ModelSceneMixinTemplate")
+	f.scene:SetAllPoints(f.model)
+	f.scene:EnableMouse(false)
+	f.scene:SetFromModelSceneID(290)
+	f.scene:Hide()
+
+	f.actor = f.scene:CreateActor()
+	f.actor:SetPosition(0, 0, 0)
+	f.actor:ClearModel()
 
 	f.bg:SetColorTexture(0.3,0.3,0.3,0.2);
 
@@ -189,29 +203,72 @@ local tryOnSlots = {
 	SecondaryHandSlot = "SECONDARYHANDSLOT",
 }
 
+-- Returns true if this model frame should use its scene/actor for custom race display
+function ModelFramePrototype:IsCustomRace()
+	if self.type == "catalogue" then
+		return mog.displayRace ~= nil
+	elseif self.type == "preview" then
+		return self.parent and self.parent.data and self.parent.data.displayRace ~= nil
+	end
+	return false
+end
+
+function ModelFramePrototype:ActivateScene()
+	if self.scene and self:IsCustomRace() then
+		self.scene:Show()
+		self.model:SetAlpha(0)
+		local raceID, genderIndex
+		if self.type == "catalogue" then
+			raceID = mog.displayRace
+			genderIndex = mog.displayGender or mog.GENDER_MALE
+		else
+			raceID = self.parent.data.displayRace
+			genderIndex = self.parent.data.displayGender or mog.GENDER_MALE
+		end
+		mog:SetActorRace(self.actor, raceID, genderIndex)
+		return true
+	elseif self.scene then
+		self.scene:Hide()
+		self.model:SetAlpha(1)
+	end
+	return false
+end
+
 function ModelFramePrototype:TryOn(item, slot, itemAppearanceModID)
 	if type(item) == "number" then
 		item = "item:"..item
 	end
-	self.model:TryOn(item, tryOnSlots[slot] or slot, itemAppearanceModID);
+	if self:IsCustomRace() and self.actor then
+		self.actor:TryOn(item)
+	else
+		self.model:TryOn(item, tryOnSlots[slot] or slot, itemAppearanceModID);
+	end
 end
 
 function ModelFramePrototype:Undress()
-	-- the worst of hacks to prevent certain armor model pieces from getting stuck on the character
-	for i, slotName in ipairs(mog.slots) do
-		local slot = GetInventorySlotInfo(slotName);
-		local item = GetInventoryItemLink("player", slot);
-		if item then
-			self:TryOn(item);
-			self:UndressSlot(slot);
+	if self:IsCustomRace() and self.actor then
+		self.actor:Undress()
+	else
+		-- the worst of hacks to prevent certain armor model pieces from getting stuck on the character
+		for i, slotName in ipairs(mog.slots) do
+			local slot = GetInventorySlotInfo(slotName);
+			local item = GetInventoryItemLink("player", slot);
+			if item then
+				self:TryOn(item);
+				self:UndressSlot(slot);
+			end
 		end
+		self:UndressSlot(GetInventorySlotInfo("MainHandSlot"));
+		self:UndressSlot(GetInventorySlotInfo("SecondaryHandSlot"));
 	end
-	self:UndressSlot(GetInventorySlotInfo("MainHandSlot"));
-	self:UndressSlot(GetInventorySlotInfo("SecondaryHandSlot"));
 end
 
 function ModelFramePrototype:UndressSlot(slot)
-	self.model:UndressSlot(slot)
+	if self:IsCustomRace() and self.actor then
+		self.actor:UndressSlot(slot)
+	else
+		self.model:UndressSlot(slot)
+	end
 end
 
 function ModelFramePrototype:ApplyDress()
@@ -228,7 +285,11 @@ end
 function ModelFramePrototype:ResetModel()
 	local model = self.model;
 	model:SetPosition(0, 0, 0);
-	model:Dress();
+	if self:ActivateScene() then
+		self.actor:Undress()
+	else
+		model:Dress();
+	end
 	model:SetAnimation(0, 0)
 	self:PositionModel();
 end
@@ -658,6 +719,28 @@ local function setSheathe(self, arg1, arg2, checked)
 	end
 end
 
+local function setCatalogueRace(self, arg1, raceID)
+	mog.displayRace = raceID
+	for i, model in ipairs(mog.models) do
+		model:ResetModel()
+		if model:IsEnabled() then
+			mog:ModelUpdate(model, model.data.value)
+		end
+	end
+	CloseDropDownMenus(1)
+end
+
+local function setCatalogueGender(self, arg1, genderIndex)
+	mog.displayGender = genderIndex
+	for i, model in ipairs(mog.models) do
+		model:ResetModel()
+		if model:IsEnabled() then
+			mog:ModelUpdate(model, model.data.value)
+		end
+	end
+	CloseDropDownMenus(1)
+end
+
 function mog:ToggleFilters()
 	mog.filt:SetShown(not mog.filt:IsShown());
 end
@@ -699,6 +782,20 @@ mog.menu.catalogue = mog.menu:CreateMenu(L["Catalogue"], function(self, tier)
 		info.checked = mog.sheathe;
 		info.isNotRadio = true;
 		info.func = setSheathe;
+		UIDropDownMenu_AddButton(info,tier);
+
+		local info = UIDropDownMenu_CreateInfo();
+		info.text = RACE;
+		info.value = "race";
+		info.notCheckable = true;
+		info.hasArrow = true;
+		UIDropDownMenu_AddButton(info,tier);
+
+		local info = UIDropDownMenu_CreateInfo();
+		info.text = L["Gender"];
+		info.value = "gender";
+		info.notCheckable = true;
+		info.hasArrow = true;
 		UIDropDownMenu_AddButton(info,tier);
 	elseif self.tier[2] == "sorting" then
 		if tier == 2 then
@@ -754,6 +851,39 @@ mog.menu.catalogue = mog.menu:CreateMenu(L["Catalogue"], function(self, tier)
 				self:AddButton(info,tier);
 			end
 		end
+	elseif self.tier[2] == "race" then
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = PLAYER
+		info.func = setCatalogueRace
+		info.arg2 = nil
+		info.checked = (mog.displayRace == nil)
+		self:AddButton(info, tier)
+
+		for i, rID in ipairs(mog.raceOrder) do
+			local raceInfo = C_CreatureInfo.GetRaceInfo(rID)
+			if raceInfo then
+				local info = UIDropDownMenu_CreateInfo()
+				info.text = raceInfo.raceName
+				info.func = setCatalogueRace
+				info.arg2 = rID
+				info.checked = (mog.displayRace == rID)
+				self:AddButton(info, tier)
+			end
+		end
+	elseif self.tier[2] == "gender" then
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = MALE
+		info.func = setCatalogueGender
+		info.arg2 = mog.GENDER_MALE
+		info.checked = ((mog.displayGender or mog.GENDER_MALE) == mog.GENDER_MALE)
+		self:AddButton(info, tier)
+
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = FEMALE
+		info.func = setCatalogueGender
+		info.arg2 = mog.GENDER_FEMALE
+		info.checked = (mog.displayGender == mog.GENDER_FEMALE)
+		self:AddButton(info, tier)
 	end
 end);
 mog.menu.catalogue:SetPoint("LEFT", mog.menu.modules, "RIGHT", 5, 0);

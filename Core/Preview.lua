@@ -1,5 +1,55 @@
-local MogIt,mog = ...;
-local L = mog.L;
+local MogIt, mog = ...
+
+local PreviewBackend = {}
+
+function PreviewBackend:ApplyItem(preview, item, slot)
+	if preview.actor then
+		preview.actor:TryOn(item)
+	else
+		preview.model:TryOn(item, slot)
+	end
+end
+
+function PreviewBackend:UndressSlot(preview, slot)
+	local slotID = GetInventorySlotInfo(slot)
+	if preview.actor then
+		preview.actor:UndressSlot(slotID)
+	else
+		preview.model:UndressSlot(slotID)
+	end
+end
+
+function PreviewBackend:SetModel(preview, displayID)
+	if preview.actor then
+		preview.actor:SetModelByID(displayID)
+	end
+end
+
+local raceDisplayIDs = mog.raceDisplayIDs
+local raceOrder = mog.raceOrder
+local GENDER_MALE = mog.GENDER_MALE
+local GENDER_FEMALE = mog.GENDER_FEMALE
+
+function PreviewBackend:SetRaceGender(preview, raceID, genderIndex)
+	mog:SetActorRace(preview.actor, raceID, genderIndex)
+end
+
+function PreviewBackend:ResetToPlayer(preview)
+	if preview.actor then
+		preview.actor:SetUnit("player")
+	end
+end
+
+function PreviewBackend:ApplyRaceOrReset(preview)
+	local data = preview.data
+	if data.displayRace then
+		self:SetRaceGender(preview, data.displayRace, data.displayGender or GENDER_MALE)
+	else
+		self:ResetToPlayer(preview)
+	end
+end
+
+local L = mog.L
 
 local TITANS_GRIP_SPELLID = 46917
 
@@ -178,10 +228,10 @@ local function setWeaponEnchant(self, preview, enchant)
 	local mainHandItem = preview.slots["MainHandSlot"].item;
 	local offHandItem = preview.slots["SecondaryHandSlot"].item;
 	if mainHandItem then
-		preview.model:TryOn(format("item:%s:%d", mainHandItem:match("item:(%d+)"), preview.data.weaponEnchant), "MainHandSlot");
+		PreviewBackend:ApplyItem(preview, format("item:%s:%d", mainHandItem:match("item:(%d+)"), preview.data.weaponEnchant), "MainHandSlot")
 	end
 	if offHandItem then
-		preview.model:TryOn(format("item:%s:%d", offHandItem:match("item:(%d+)"), preview.data.weaponEnchant), "SecondaryHandSlot");
+		PreviewBackend:ApplyItem(preview, format("item:%s:%d", offHandItem:match("item:(%d+)"), preview.data.weaponEnchant), "SecondaryHandSlot")
 	end
 end
 
@@ -189,7 +239,45 @@ function mog:SetPreviewEnchant(preview, enchant)
 	setWeaponEnchant(preview, preview, enchant)
 end
 
+local function redressPreview(preview)
+	if preview.actor then
+		preview.actor:Undress()
+		for id, slot in pairs(preview.slots) do
+			if slot.item then
+				local item = format(gsub(slot.item, "item:(%d+):0", "item:%1:%%d"), preview.data.weaponEnchant or 0)
+				PreviewBackend:ApplyItem(preview, item, slot.slot)
+			end
+		end
+	end
+end
+
+local function setDisplayRace(self, arg1, raceID)
+	currentPreview.data.displayRace = raceID
+	PreviewBackend:ApplyRaceOrReset(currentPreview)
+	redressPreview(currentPreview)
+	CloseDropDownMenus()
+end
+
+local function setDisplayGender(self, arg1, genderIndex)
+	currentPreview.data.displayGender = genderIndex
+	PreviewBackend:ApplyRaceOrReset(currentPreview)
+	redressPreview(currentPreview)
+	CloseDropDownMenus()
+end
+
 local previewMenu = {
+	{
+		text = RACE,
+		value = "race",
+		notCheckable = true,
+		hasArrow = true,
+	},
+	{
+		text = L["Gender"],
+		value = "gender",
+		notCheckable = true,
+		hasArrow = true,
+	},
 	{
 		text = L["Weapon enchant"],
 		value = "weaponEnchant",
@@ -279,6 +367,40 @@ local function previewInitialize(self, level)
 		for i, info in ipairs(previewMenu) do
 			UIDropDownMenu_AddButton(info, level);
 		end
+	elseif self.tier[2] == "race" then
+		-- "Player" option to reset to own character
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = PLAYER
+		info.func = setDisplayRace
+		info.arg2 = nil
+		info.checked = (self.parent.data.displayRace == nil)
+		self:AddButton(info, level)
+
+		for i, rID in ipairs(raceOrder) do
+			local raceInfo = C_CreatureInfo.GetRaceInfo(rID)
+			if raceInfo then
+				local info = UIDropDownMenu_CreateInfo()
+				info.text = raceInfo.raceName
+				info.func = setDisplayRace
+				info.arg2 = rID
+				info.checked = (self.parent.data.displayRace == rID)
+				self:AddButton(info, level)
+			end
+		end
+	elseif self.tier[2] == "gender" then
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = MALE
+		info.func = setDisplayGender
+		info.arg2 = GENDER_MALE
+		info.checked = ((self.parent.data.displayGender or GENDER_MALE) == GENDER_MALE)
+		self:AddButton(info, level)
+
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = FEMALE
+		info.func = setDisplayGender
+		info.arg2 = GENDER_FEMALE
+		info.checked = (self.parent.data.displayGender == GENDER_FEMALE)
+		self:AddButton(info, level)
 	elseif self.tier[2] == "weaponEnchant" then
 		if level == 2 then
 			local info = UIDropDownMenu_CreateInfo();
@@ -478,6 +600,10 @@ local function initPreview(frame, id)
 	frame:SetSize(props.w, props.h);
 	frame:SetTitle(L["Preview %d"]:format(id));
 	frame.data = { };
+	-- Reset actor to player model when recycling from bin
+	if frame.actor then
+		frame.actor:SetUnit("player")
+	end
 end
 
 mog.previews = {};
@@ -486,100 +612,125 @@ mog.previewNum = 0;
 
 function mog:CreatePreview()
 	if mog.previewBin[1] then
-		local f = mog.previewBin[1];
-		local leastIndex = #mog.previews + 1;
-		-- find the lowest unused frame ID
+		local f = mog.previewBin[1]
+		local leastIndex = #mog.previews + 1
+
 		for i, v in ipairs(self.previewBin) do
-			leastIndex = min(v:GetID(), leastIndex);
+			leastIndex = min(v:GetID(), leastIndex)
 		end
-		initPreview(f, leastIndex);
-		f:Show();
-		mog:ActivatePreview(f);
-		tremove(mog.previewBin,1);
-		tinsert(mog.previews, f);
-		return f;
+
+		initPreview(f, leastIndex)
+		f:Show()
+		mog:ActivatePreview(f)
+
+		tremove(mog.previewBin, 1)
+		tinsert(mog.previews, f)
+		return f
 	end
 
-	mog.previewNum = mog.previewNum + 1;
-	local id = mog.previewNum;
-	local f = CreateFrame("Frame", "MogItPreview"..id, mog.view, "ButtonFrameTemplate");
-	initPreview(f, id);
+	mog.previewNum = mog.previewNum + 1
+	local id = mog.previewNum
 
-	f:SetToplevel(true);
-	f:SetClampedToScreen(true);
-	f:EnableMouse(true);
-	f:SetMovable(true);
-	f:SetResizable(true);
-	f:Raise();
+	local f = CreateFrame("Frame", "MogItPreview"..id, mog.view, "ButtonFrameTemplate")
 
-	f.onCloseCallback = previewOnClose;
-	f.Bg = _G["MogItPreview"..id.."Bg"];
-	--f.Bg:SetVertexColor(0.8,0.3,0.8);
-	ButtonFrameTemplate_HidePortrait(f);
+	initPreview(f, id)
 
-	f.resize = CreateFrame("Button", nil, f);
-	f.resize:SetSize(16, 16);
-	f.resize:SetPoint("BOTTOMRIGHT", -4, 3);
-	f.resize:EnableMouse(true);
-	f.resize:SetHitRectInsets(0, -4, 0, -3);
-	f.resize:SetScript("OnMouseDown", resizeOnMouseDown);
-	f.resize:SetScript("OnMouseUp", resizeOnMouseUp);
-	f.resize:SetScript("OnHide", resizeOnMouseUp);
-	f.resize:SetNormalTexture([[Interface\ChatFrame\UI-ChatIM-SizeGrabber-Up]]);
+	f:SetToplevel(true)
+	f:SetClampedToScreen(true)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:SetResizable(true)
+	f:Raise()
+
+	f.onCloseCallback = previewOnClose
+	f.Bg = _G["MogItPreview"..id.."Bg"]
+	ButtonFrameTemplate_HidePortrait(f)
+
+	-- Resize handle
+	f.resize = CreateFrame("Button", nil, f)
+	f.resize:SetSize(16, 16)
+	f.resize:SetPoint("BOTTOMRIGHT", -4, 3)
+	f.resize:EnableMouse(true)
+	f.resize:SetHitRectInsets(0, -4, 0, -3)
+	f.resize:SetScript("OnMouseDown", resizeOnMouseDown)
+	f.resize:SetScript("OnMouseUp", resizeOnMouseUp)
+	f.resize:SetScript("OnHide", resizeOnMouseUp)
+	f.resize:SetNormalTexture([[Interface\ChatFrame\UI-ChatIM-SizeGrabber-Up]])
 	f.resize:SetPushedTexture([[Interface\ChatFrame\UI-ChatIM-SizeGrabber-Down]])
 	f.resize:SetHighlightTexture([[Interface\ChatFrame\UI-ChatIM-SizeGrabber-Highlight]])
 
-	f.slots = {};
+	-- Slots
+	f.slots = {}
 	for i, slotIndex in ipairs(mog.slots) do
-		local slot = CreateFrame("ItemButton", nil, f);
-		slot.slot = slotIndex;
+		local slot = CreateFrame("ItemButton", nil, f)
+		slot.slot = slotIndex
+
 		if i == 1 then
-			slot:SetPoint("TOPLEFT", f.Inset, "TOPLEFT", 8, -8);
+			slot:SetPoint("TOPLEFT", f.Inset, "TOPLEFT", 8, -8)
 		elseif i == 8 then
-			slot:SetPoint("TOPRIGHT", f.Inset, "TOPRIGHT", -7, -8);
+			slot:SetPoint("TOPRIGHT", f.Inset, "TOPRIGHT", -7, -8)
 		elseif i == 12 then
-			slot:SetPoint("TOP", f.slots[mog:GetSlot(i-1)], "BOTTOM", 0, -45);
+			slot:SetPoint("TOP", f.slots[mog:GetSlot(i-1)], "BOTTOM", 0, -45)
 		else
-			slot:SetPoint("TOP", f.slots[mog:GetSlot(i-1)], "BOTTOM", 0, -4);
+			slot:SetPoint("TOP", f.slots[mog:GetSlot(i-1)], "BOTTOM", 0, -4)
 		end
-		slot:RegisterForClicks("AnyUp");
-		slot:SetScript("OnClick", slotOnClick);
-		slot:SetScript("OnEnter", slotOnEnter);
-		slot:SetScript("OnLeave", GameTooltip_Hide);
-		slot.OnEnter = slotOnEnter;
-		slot.history = {};
-		f.slots[slotIndex] = slot;
-		slotTexture(f, slotIndex);
+
+		slot:RegisterForClicks("AnyUp")
+		slot:SetScript("OnClick", slotOnClick)
+		slot:SetScript("OnEnter", slotOnEnter)
+		slot:SetScript("OnLeave", GameTooltip_Hide)
+		slot.OnEnter = slotOnEnter
+		slot.history = {}
+
+		f.slots[slotIndex] = slot
+		slotTexture(f, slotIndex)
 	end
 
-	f.model = mog:CreateModelFrame(f);
-	f.model.type = "preview";
-	f.model:Show();
-	f.model:EnableMouseWheel(true);
-	f.model:SetScript("OnMouseWheel", modelOnMouseWheel);
-	f.model:SetPoint("TOPLEFT", f.Inset, "TOPLEFT", 49, -8);
-	f.model:SetPoint("BOTTOMRIGHT", f.Inset, "BOTTOMRIGHT", -49, 8);
+	-- Create old model FIRST
+	f.model = mog:CreateModelFrame(f)
+	f.model.type = "preview"
+	f.model:Show()
+	f.model:EnableMouseWheel(true)
+	f.model:SetScript("OnMouseWheel", modelOnMouseWheel)
+	f.model:SetPoint("TOPLEFT", f.Inset, "TOPLEFT", 49, -8)
+	f.model:SetPoint("BOTTOMRIGHT", f.Inset, "BOTTOMRIGHT", -49, 8)
 
-	f.activate = CreateFrame("Button", "MogItPreview"..id.."Activate", f, "MagicButtonTemplate");
-	f.activate:SetText(L["Activate"]);
-	f.activate:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 5, 5);
-	f.activate:SetWidth(100);
-	f.activate:SetScript("OnClick", previewActivate);
+	-- Create ModelScene correctly anchored to model
+	f.scene = CreateFrame("ModelScene", nil, f, "ModelSceneMixinTemplate")
+	f.scene:SetAllPoints(f.model)
+	f.scene:EnableMouse(false)
+	f.scene:SetFromModelSceneID(290)
 
-	f:SetScript("OnMouseDown", f.StartMoving);
-	f:SetScript("OnMouseUp", stopMovingOrSizing);
+	f.actor = f.scene:CreateActor()
+	f.actor:SetPosition(0, 0, 0)
+	f.actor:ClearModel()
 
-	createMenuBar(f);
-	mog:ActivatePreview(f);
+	-- Give it a valid base model
+	f.actor:SetUnit("player")
 
-	-- child frames occasionally appears behind the parent for whatever reason, so we raise them here
-	raiseAll(f, f:GetChildren());
-	-- above function doesn't raise the close button
-	local newLevel = f.CloseButton:GetFrameLevel() + 1;
-	f.CloseButton:SetFrameLevel(newLevel);
+	-- Hide old model
+	f.model:SetAlpha(0)
 
-	tinsert(mog.previews, f);
-	return f;
+	-- Activate button
+	f.activate = CreateFrame("Button", "MogItPreview"..id.."Activate", f, "MagicButtonTemplate")
+	f.activate:SetText(L["Activate"])
+	f.activate:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 5, 5)
+	f.activate:SetWidth(100)
+	f.activate:SetScript("OnClick", previewActivate)
+
+	f:SetScript("OnMouseDown", f.StartMoving)
+	f:SetScript("OnMouseUp", stopMovingOrSizing)
+
+	createMenuBar(f)
+	mog:ActivatePreview(f)
+
+	-- Fix layering
+	raiseAll(f, f:GetChildren())
+	local newLevel = f.CloseButton:GetFrameLevel() + 1
+	f.CloseButton:SetFrameLevel(newLevel)
+
+	tinsert(mog.previews, f)
+	return f
 end
 
 function mog:DeletePreview(f)
@@ -729,14 +880,12 @@ function mog.view.AddItem(item, preview, forceSlot, setItem)
 			end
 
 			if invType == "INVTYPE_WEAPON" then
-				-- put one handed weapons in the off hand if: main hand is occupied, off hand is free and a two handed weapon isn't equipped
 				if preview.slots["MainHandSlot"].item and not preview.slots["SecondaryHandSlot"].item and not preview.data.twohand then
 					slot = "SecondaryHandSlot";
 				end
 			end
 
 			if invType == "INVTYPE_2HWEAPON" or invType == "INVTYPE_RANGED" or (invType == "INVTYPE_RANGEDRIGHT" and itemInfo.subClassID == Enum.ItemWeaponSubclass.Wand) then
-				-- if any two handed weapon is being equipped, first clear up both hands
 				mog.view.DelItem("MainHandSlot", preview);
 				mog.view.DelItem("SecondaryHandSlot", preview);
 				preview.data.twohand = true;
@@ -773,7 +922,7 @@ function mog.view.AddItem(item, preview, forceSlot, setItem)
 			if invType == "INVTYPE_RANGED" then
 				slot = "SecondaryHandSlot";
 			end
-			preview.model:TryOn(item, slot);
+			PreviewBackend:ApplyItem(preview, item, slot)
 			if preview.data.title and not setItem then
 				preview:SetTitle("*"..preview.data.title);
 			end
@@ -797,7 +946,7 @@ function mog.view.DelItem(slot, preview)
 		if invType == "INVTYPE_RANGED" then
 			slot = "SecondaryHandSlot"
 		end
-		preview.model:UndressSlot(GetInventorySlotInfo(slot));
+		PreviewBackend:UndressSlot(preview, slot);
 	end
 end
 

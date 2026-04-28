@@ -38,7 +38,7 @@ function mog.base.Dropdown(module, tier)
 		UIDropDownMenu_AddButton(info, tier);
 
 		for i, slot in ipairs(module.slotList) do
-			if slot.isWeapon and not module.slotList[i - 1].isWeapon then
+			if slot.isWeapon and (i == 1 or not module.slotList[i - 1].isWeapon) then
 				local info = UIDropDownMenu_CreateInfo();
 				info.text = WEAPON;
 				info.isTitle = true;
