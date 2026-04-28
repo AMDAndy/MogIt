@@ -11,6 +11,7 @@ local ModelFramePrototype = CreateFrame("Button")
 local ModelFrame_MT = {__index = ModelFramePrototype}
 
 --// mog.frame
+if not mog.frame then return end
 mog.frame:EnableMouseWheel(true);
 local function stopMovingOrSizing(self)
 	self:StopMovingOrSizing();

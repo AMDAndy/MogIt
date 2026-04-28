@@ -1,6 +1,4 @@
 .release/
 
-Libs/
-
 # Windows NTFS zone transfer metadata
 *:Zone.Identifier

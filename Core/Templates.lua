@@ -256,7 +256,8 @@ do	-- item functions
 		if not (self and item) then return end
 
 		if button == "LeftButton" then
-			if not HandleModifiedItemClick(select(2, C_Item.GetItemInfo(item))) and data.items then
+			local link = C_Item.GetItemLink and C_Item.GetItemLink(item) or (C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(item)))
+			if not HandleModifiedItemClick(link) and data.items then
 				data.cycle = (data.cycle % #data.items) + 1
 				data.item = data.items[data.cycle]
 				self:OnEnter()

@@ -60,12 +60,12 @@ mog.view:SetScript("OnShow",function(self)
 	if #mog.previews == 0 then
 		mog:CreatePreview();
 	end
-	if mog.db.profile.singlePreview then
+	if mog.db and mog.db.profile.singlePreview then
 		ShowUIPanel(mog.previews[1]);
 	end
 end);
 mog.view:SetScript("OnHide",function(self)
-	if mog.db.profile.singlePreview then
+	if mog.db and mog.db.profile.singlePreview then
 		HideUIPanel(mog.previews[1]);
 	end
 end);

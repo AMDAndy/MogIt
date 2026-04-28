@@ -15,10 +15,9 @@ f.source:SetPoint("RIGHT",f,"RIGHT",0,0);
 f.source:SetText(L["Source"]..":");
 f.source:SetJustifyH("LEFT");
 
-f.dd = CreateFrame("Frame","MogItFiltersSourceDropdown",f,"UIDropDownMenuTemplate");
+f.dd = mog:CreateDropdown("Frame",f,"MogItFiltersSourceDropdown");
 f.dd:SetPoint("TOPLEFT",f.source,"BOTTOMLEFT",-16,-2);
 UIDropDownMenu_SetWidth(f.dd,125);
-UIDropDownMenu_SetButtonWidth(f.dd,140);
 UIDropDownMenu_JustifyText(f.dd,"LEFT");
 
 function f.dd.SelectAll(self)

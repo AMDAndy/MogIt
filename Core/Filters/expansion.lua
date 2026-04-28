@@ -16,10 +16,9 @@ f.quality:SetPoint("RIGHT",f,"RIGHT",0,0);
 f.quality:SetText(EXPANSION_FILTER_TEXT..":");
 f.quality:SetJustifyH("LEFT");
 
-f.dd = CreateFrame("Frame","MogItFiltersQualityDropdown",f,"UIDropDownMenuTemplate");
+f.dd = mog:CreateDropdown("Frame",f,"MogItFiltersExpansionDropdown");
 f.dd:SetPoint("TOPLEFT",f.quality,"BOTTOMLEFT",-16,-2);
 UIDropDownMenu_SetWidth(f.dd,125);
-UIDropDownMenu_SetButtonWidth(f.dd,140);
 UIDropDownMenu_JustifyText(f.dd,"LEFT");
 
 function f.dd.SelectAll(self, selectAll)
