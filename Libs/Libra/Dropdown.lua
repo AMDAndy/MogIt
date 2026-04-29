@@ -15,8 +15,36 @@ local Prototype = {}
 local MenuPrototype = setmetatable({}, {__index = Prototype})
 local FramePrototype = setmetatable({}, {__index = Prototype})
 
-local menuMT = {__index = MenuPrototype}
-local frameMT = {__index = FramePrototype}
+-- Metatables are finalized in the constructor once we can capture the
+-- original frame __index so that WoW API methods (SetSize, etc.) remain
+-- accessible through the chain:  frameMT -> FramePrototype -> Prototype -> <WoW frame methods>
+local menuMT, frameMT
+local function buildMetatables()
+	if frameMT then return end
+	local tmp = CreateFrame("Frame")
+	local origIndex = getmetatable(tmp).__index
+	-- Chain: FramePrototype falls back to original frame methods
+	setmetatable(FramePrototype, {__index = function(t, k)
+		local v = Prototype[k]
+		if v ~= nil then return v end
+		if type(origIndex) == "table" then
+			return origIndex[k]
+		elseif type(origIndex) == "function" then
+			return origIndex(t, k)
+		end
+	end})
+	setmetatable(MenuPrototype, {__index = function(t, k)
+		local v = Prototype[k]
+		if v ~= nil then return v end
+		if type(origIndex) == "table" then
+			return origIndex[k]
+		elseif type(origIndex) == "function" then
+			return origIndex(t, k)
+		end
+	end})
+	frameMT = {__index = FramePrototype}
+	menuMT = {__index = MenuPrototype}
+end
 
 -- ============================================================
 -- Generation State
@@ -469,7 +497,8 @@ function FramePrototype:GetSelectedID() return self._selectedID end
 -- Constructor
 -- ============================================================
 local function constructor(self, type, parent, name)
-local dropdown
+	buildMetatables()
+	local dropdown
 if type == "Menu" then
 dropdown = setmetatable(CreateFrame("Frame"), menuMT)
 dropdown._displayMode = "MENU"
